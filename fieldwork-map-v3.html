@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FieldWork Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --earth: #2C1A0E; --bark: #3D2412; --moss: #4B6A3B;
+    --moss-light: #6B9A55; --clay: #C4622D; --clay-light: #E07A45;
+    --cream: #F5EDD8; --fog: #B8C4A8; --sand: #E8D5B0; --white: #FDFAF4;
+  }
+  html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--earth); color: var(--cream); }
+
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--bark); border-bottom: 3px solid var(--clay);
+    padding: 10px 16px; display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4); z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 8px; }
+  .logo h1 { font-size: 18px; font-weight: 800; letter-spacing: 1.5px; color: var(--clay-light); text-transform: uppercase; }
+  .header-stats { display: flex; gap: 14px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 18px; font-weight: 700; color: var(--moss-light); line-height: 1; }
+  .stat-label { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--fog); margin-top: 2px; }
+
+  /* ── FILTER BAR ── */
+  .filters {
+    background: var(--bark); border-bottom: 1px solid rgba(196,98,45,0.2);
+    padding: 8px 12px; display: flex; gap: 8px; align-items: center;
+    flex-shrink: 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter-label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--fog); white-space: nowrap; flex-shrink: 0; }
+  .chip {
+    padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 2px solid transparent; white-space: nowrap;
+    background: rgba(255,255,255,0.08); color: var(--fog); flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .chip.active { border-color: currentColor; color: var(--cream); background: rgba(255,255,255,0.12); }
+  .chip-all.active { color: var(--clay-light); border-color: var(--clay-light); }
+
+  /* ── MAP AREA ── */
+  .map-wrap { flex: 1; position: relative; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+
+  /* ── TOOLBAR (mobile floating buttons) ── */
+  .toolbar {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 50;
+  }
+  .tool-btn {
+    background: var(--bark); color: var(--cream);
+    border: 1px solid rgba(196,98,45,0.3);
+    border-radius: 24px; padding: 10px 16px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .tool-btn.active { background: var(--moss); border-color: var(--moss); }
+
+  /* ── BOTTOM SHEET (job list on mobile) ── */
+  .bottom-sheet {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: var(--bark); border-radius: 16px 16px 0 0;
+    border-top: 2px solid rgba(196,98,45,0.3);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    z-index: 60; transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    max-height: 70vh; display: flex; flex-direction: column;
+  }
+  .bottom-sheet.open { transform: translateY(0); }
+  .sheet-handle {
+    width: 40px; height: 4px; background: rgba(196,98,45,0.4);
+    border-radius: 2px; margin: 10px auto 0;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .sheet-header {
+    padding: 10px 16px 8px; display: flex; justify-content: space-between;
+    align-items: center; flex-shrink: 0;
+    border-bottom: 1px solid rgba(196,98,45,0.15);
+  }
+  .sheet-title { font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--clay-light); }
+  .sheet-close { background: none; border: none; color: var(--fog); font-size: 20px; cursor: pointer; padding: 0 4px; }
+  .job-list { overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; }
+  .job-list::-webkit-scrollbar { width: 3px; }
+  .job-list::-webkit-scrollbar-thumb { background: var(--clay); border-radius: 2px; }
+
+  /* ── DATE FILTER SHEET ── */
+  .date-sheet {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: var(--bark); border-radius: 16px 16px 0 0;
+    border-top: 2px solid rgba(196,98,45,0.3);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    z-index: 61; transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    padding: 16px;
+  }
+  .date-sheet.open { transform: translateY(0); }
+  .date-sheet h3 { font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--clay-light); margin-bottom: 14px; }
+  .date-row { display: flex; gap: 10px; margin-bottom: 12px; }
+  .date-field { flex: 1; }
+  .date-field label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--fog); display: block; margin-bottom: 4px; }
+  .date-field input {
+    width: 100%; background: var(--earth); border: 1px solid rgba(196,98,45,0.35);
+    border-radius: 8px; color: var(--cream); font-size: 14px;
+    padding: 10px 12px; outline: none;
+  }
+  .date-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .date-actions button {
+    flex: 1; padding: 11px; border-radius: 8px; font-size: 14px;
+    font-weight: 600; cursor: pointer; border: none;
+  }
+  .btn-apply { background: var(--moss); color: var(--white); }
+  .btn-clear { background: rgba(196,98,45,0.2); color: var(--clay-light); border: 1px solid rgba(196,98,45,0.3) !important; }
+
+  /* ── JOB ITEMS ── */
+  .job-item {
+    padding: 12px 16px; border-bottom: 1px solid rgba(196,98,45,0.1);
+    cursor: pointer; border-left: 3px solid transparent;
+    transition: background 0.15s;
+  }
+  .job-item:active { background: rgba(255,255,255,0.04); }
+  .job-item.active { background: rgba(196,98,45,0.1); }
+  .job-item-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .job-item-client { font-size: 15px; font-weight: 600; color: var(--cream); }
+  .job-item-dur { font-size: 17px; font-weight: 700; color: var(--moss-light); font-family: monospace; }
+  .job-item-date { font-size: 12px; color: var(--fog); margin-top: 3px; }
+  .job-item-notes { font-size: 12px; color: var(--sand); margin-top: 2px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-item-badges { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 8px; font-weight: 600; }
+  .badge-photo { background: rgba(75,106,59,0.3); color: var(--moss-light); }
+  .badge-manual { background: rgba(196,98,45,0.2); color: var(--clay-light); }
+  .badge-nogps { background: rgba(184,196,168,0.15); color: var(--fog); }
+
+  /* ── SIDEBAR (desktop) ── */
+  .sidebar {
+    width: 300px; background: var(--bark);
+    border-left: 1px solid rgba(196,98,45,0.2);
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 12px 14px; border-bottom: 1px solid rgba(196,98,45,0.2);
+    font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--clay-light);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .sidebar-count { color: var(--fog); font-weight: 400; }
+  .sidebar .job-list { overflow-y: auto; flex: 1; }
+  .sidebar .job-list::-webkit-scrollbar { width: 4px; }
+  .sidebar .job-list::-webkit-scrollbar-thumb { background: var(--clay); border-radius: 2px; }
+
+  /* ── LOADING ── */
+  #loading {
+    position: absolute; inset: 0; background: var(--earth);
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; z-index: 200; gap: 16px;
+  }
+  .spinner {
+    width: 48px; height: 48px; border: 4px solid rgba(196,98,45,0.2);
+    border-top-color: var(--clay-light); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { color: var(--fog); font-size: 14px; }
+
+  /* ── POPUP ── */
+  .popup-wrap {
+    background: var(--bark); border-radius: 10px; overflow: hidden;
+    min-width: 240px; max-width: 280px;
+    border: 1px solid rgba(196,98,45,0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .popup-header { background: var(--earth); padding: 10px 12px; border-bottom: 1px solid rgba(196,98,45,0.2); }
+  .popup-client { font-size: 15px; font-weight: 700; }
+  .popup-business { font-size: 11px; color: var(--fog); margin-top: 2px; }
+  .popup-body { padding: 10px 12px; }
+  .popup-duration { font-size: 22px; font-weight: 700; color: var(--moss-light); font-family: monospace; display: block; margin-bottom: 8px; }
+  .popup-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+  .popup-row-label { color: var(--fog); }
+  .popup-row-value { color: var(--cream); font-weight: 500; text-align: right; max-width: 160px; }
+  .popup-notes { font-size: 11px; color: var(--sand); font-style: italic; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(196,98,45,0.15); }
+  .popup-photos { display: flex; gap: 6px; margin-top: 8px; }
+  .popup-photo-link { flex: 1; aspect-ratio: 1; border-radius: 6px; overflow: hidden; display: block; background: var(--earth); border: 1px solid rgba(196,98,45,0.2); text-decoration: none; position: relative; min-height: 80px; }
+  .popup-photo-link img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .popup-photo-label { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(44,26,14,0.75); color: var(--cream); font-size: 10px; text-align: center; padding: 3px; font-weight: 600; }
+  .popup-maplink { display: block; margin-top: 8px; background: var(--moss); color: var(--white); text-align: center; padding: 8px; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; }
+  .popup-manual { font-size: 10px; color: var(--clay); text-align: right; margin-top: 4px; }
+
+  .leaflet-popup-content-wrapper { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+  .leaflet-popup-tip-container { display: none; }
+  .leaflet-popup-close-button { color: var(--fog) !important; font-size: 20px !important; top: 6px !important; right: 8px !important; z-index: 10; width: 32px !important; height: 32px !important; }
+  .leaflet-popup-close-button:hover { color: var(--cream) !important; }
+  .marker-cluster-small, .marker-cluster-medium, .marker-cluster-large { background-color: rgba(75,106,59,0.5) !important; }
+  .marker-cluster-small div, .marker-cluster-medium div, .marker-cluster-large div { background-color: rgba(75,106,59,0.9) !important; color: white !important; font-weight: 700 !important; }
+
+  /* ── RESPONSIVE ── */
+  .desktop-only { display: flex; }
+  .mobile-only { display: none; }
+
+  @media (max-width: 768px) {
+    .desktop-only { display: none !important; }
+    .mobile-only { display: flex !important; }
+    .logo h1 { font-size: 15px; }
+    .stat-value { font-size: 16px; }
+  }
+
+  .no-jobs { padding: 30px 16px; text-align: center; color: var(--fog); font-size: 13px; line-height: 1.6; }
+
+  /* overlay for closing sheets */
+  .overlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.4);
+    z-index: 59; display: none;
+  }
+  .overlay.show { display: block; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="logo">
+      <span>🌿</span>
+      <h1>FieldWork Map</h1>
+    </div>
+    <div class="header-stats">
+      <div class="stat"><div class="stat-value" id="stat-jobs">—</div><div class="stat-label">Jobs</div></div>
+      <div class="stat"><div class="stat-value" id="stat-hours">—</div><div class="stat-label">Hours</div></div>
+      <div class="stat"><div class="stat-value" id="stat-clients">—</div><div class="stat-label">Clients</div></div>
+    </div>
+  </header>
+
+  <!-- Filter chips (horizontal scroll on mobile) -->
+  <div class="filters" id="filterBar">
+    <span class="filter-label">Client</span>
+    <div id="clientChips" style="display:flex;gap:6px;flex-shrink:0">
+      <div class="chip chip-all active" onclick="filterClient('all')">All</div>
+    </div>
+  </div>
+
+  <div class="map-wrap">
+    <div id="map">
+      <div id="loading">
+        <div class="spinner"></div>
+        <p>Loading job data…</p>
+      </div>
+    </div>
+
+    <!-- Overlay for closing bottom sheets -->
+    <div class="overlay" id="overlay" onclick="closeAllSheets()"></div>
+
+    <!-- Mobile floating buttons -->
+    <div class="toolbar mobile-only">
+      <button class="tool-btn" onclick="toggleDateSheet()">📅 Date Filter</button>
+      <button class="tool-btn" id="listBtn" onclick="toggleJobList()">📋 Job List</button>
+    </div>
+
+    <!-- Mobile bottom sheet: job list -->
+    <div class="bottom-sheet" id="jobSheet">
+      <div class="sheet-handle" onclick="closeAllSheets()"></div>
+      <div class="sheet-header">
+        <span class="sheet-title">Work Log <span id="sheet-count" style="color:var(--fog);font-weight:400"></span></span>
+        <button class="sheet-close" onclick="closeAllSheets()">×</button>
+      </div>
+      <div class="job-list" id="jobListMobile"></div>
+    </div>
+
+    <!-- Mobile bottom sheet: date filter -->
+    <div class="date-sheet" id="dateSheet">
+      <h3>📅 Date Filter</h3>
+      <div class="date-row">
+        <div class="date-field">
+          <label>From</label>
+          <input type="date" id="dateFrom" onchange="applyFilters()">
+        </div>
+        <div class="date-field">
+          <label>To</label>
+          <input type="date" id="dateTo" onchange="applyFilters()">
+        </div>
+      </div>
+      <div class="date-actions">
+        <button class="btn-clear" onclick="clearDates()">✕ Clear</button>
+        <button class="btn-apply" onclick="closeAllSheets()">Apply</button>
+      </div>
+    </div>
+
+    <!-- Desktop sidebar -->
+    <div class="sidebar desktop-only" style="position:absolute;right:0;top:0;bottom:0;z-index:40">
+      <div class="sidebar-header">
+        Work Log
+        <span class="sidebar-count" id="sidebar-count"></span>
+      </div>
+      <div class="job-list" id="jobListDesktop"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const SHEET_ID = '1QdAOyoNmWB7_T8OJtqyWGNl7pEwXkVPxS99yVHOGGQ0';
+const SHEETS_KEY = 'AIzaSyCSLcEx_i5oD_CkPk62k0OiOMOlS2LWtOM';
+const CLIENT_COLOURS = ['#6B9A55','#E07A45','#5B8EC4','#C4622D','#8E6BC4','#C4A62D','#2DC4A6','#C42D6B'];
+
+const isMobile = () => window.innerWidth <= 768;
+
+// ── MAP ───────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: !isMobile(), maxZoom: 18 });
+if (isMobile()) L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri', maxZoom: 18, maxNativeZoom: 17,
+}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 18, maxNativeZoom: 17, opacity: 0.8,
+}).addTo(map);
+map.setView([49.53, -124.80], 11);
+
+const clusterGroup = L.markerClusterGroup({
+  maxClusterRadius: 40, spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false, zoomToBoundsOnClick: true, disableClusteringAtZoom: 16,
+});
+map.addLayer(clusterGroup);
+
+// ── STATE ─────────────────────────────────────────────────────
+let allJobs = [], jobMarkers = {}, activeClient = 'all', clientColourMap = {}, activeJobId = null;
+
+// ── HELPERS ───────────────────────────────────────────────────
+const parseGps = str => { if (!str) return null; const p = str.split(',').map(s => parseFloat(s.trim())); return (p.length===2&&!isNaN(p[0])&&!isNaN(p[1])) ? {lat:p[0],lon:p[1]} : null; };
+const parseAusDate = str => { if (!str) return null; try { if (str.includes('/')) { const [d,m,y]=str.split('/'); return new Date(+y,+m-1,+d); } return new Date(str); } catch { return null; } };
+const fmtHours = hrs => { const h=Math.floor(hrs),m=Math.round((hrs-h)*60); return m>0?`${h}h ${m}m`:`${h}h`; };
+const driveThumb = url => { if (!url) return null; const m=url.match(/\/d\/([a-zA-Z0-9_-]+)/); return m?`https://drive.google.com/thumbnail?id=${m[1]}&sz=w200`:null; };
+
+// ── BOTTOM SHEET CONTROLS ─────────────────────────────────────
+function toggleJobList() {
+  const sheet = document.getElementById('jobSheet');
+  const isOpen = sheet.classList.contains('open');
+  closeAllSheets();
+  if (!isOpen) { sheet.classList.add('open'); document.getElementById('overlay').classList.add('show'); document.getElementById('listBtn').classList.add('active'); }
+}
+function toggleDateSheet() {
+  const sheet = document.getElementById('dateSheet');
+  const isOpen = sheet.classList.contains('open');
+  closeAllSheets();
+  if (!isOpen) { sheet.classList.add('open'); document.getElementById('overlay').classList.add('show'); }
+}
+function closeAllSheets() {
+  document.getElementById('jobSheet').classList.remove('open');
+  document.getElementById('dateSheet').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('listBtn').classList.remove('active');
+}
+
+// ── COLOURS & ICONS ───────────────────────────────────────────
+function buildClientColours() {
+  const clients = [...new Set(allJobs.map(j => j.client))];
+  clients.forEach((c,i) => { clientColourMap[c] = CLIENT_COLOURS[i % CLIENT_COLOURS.length]; });
+}
+
+function makeIcon(colour, isEnd) {
+  const inner = isEnd
+    ? `<text x="14" y="19" text-anchor="middle" font-size="10" font-weight="bold" fill="${colour}" font-family="sans-serif">E</text>`
+    : `<circle cx="14" cy="14" r="4" fill="${colour}"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36"><path d="M14 0C6.268 0 0 6.268 0 14c0 9.333 14 22 14 22S28 23.333 28 14C28 6.268 21.732 0 14 0z" fill="${colour}" stroke="rgba(255,255,255,0.8)" stroke-width="2"/><circle cx="14" cy="14" r="7" fill="white"/>${inner}</svg>`;
+  return L.divIcon({ html: svg, iconSize:[28,36], iconAnchor:[14,36], popupAnchor:[0,-38], className:'' });
+}
+
+// ── POPUP ─────────────────────────────────────────────────────
+function buildPopup(job) {
+  const colour = clientColourMap[job.client] || CLIENT_COLOURS[0];
+  const startThumb = driveThumb(job.startPhoto);
+  const endThumb = driveThumb(job.endPhoto);
+  const photosHtml = (startThumb||endThumb) ? `<div class="popup-photos">
+    ${startThumb?`<a href="${job.startPhoto}" target="_blank" class="popup-photo-link"><img src="${startThumb}" loading="lazy" onerror="this.style.display='none'"><div class="popup-photo-label">Start</div></a>`:''}
+    ${endThumb?`<a href="${job.endPhoto}" target="_blank" class="popup-photo-link"><img src="${endThumb}" loading="lazy" onerror="this.style.display='none'"><div class="popup-photo-label">End</div></a>`:''}
+  </div>` : '';
+  const mapsLink = job.startGps ? `https://www.google.com/maps/search/?api=1&query=${job.startGps.lat},${job.startGps.lon}` : job.mapLink;
+  return `<div class="popup-wrap">
+    <div class="popup-header" style="border-left:4px solid ${colour}">
+      <div class="popup-client">${job.client}</div>
+      ${job.business?`<div class="popup-business">🏢 ${job.business}</div>`:''}
+    </div>
+    <div class="popup-body">
+      <span class="popup-duration">${fmtHours(job.durationHrs)}</span>
+      <div class="popup-row"><span class="popup-row-label">📅 Date</span><span class="popup-row-value">${job.date}</span></div>
+      <div class="popup-row"><span class="popup-row-label">🕐 Time</span><span class="popup-row-value">${job.startTime}${job.endTime?' → '+job.endTime:''}</span></div>
+      ${job.notes?`<div class="popup-notes">📝 ${job.notes}</div>`:''}
+      ${photosHtml}
+      ${mapsLink?`<a href="${mapsLink}" target="_blank" class="popup-maplink">🗺 Open in Google Maps</a>`:''}
+      ${job.manual?'<div class="popup-manual">Manual entry</div>':''}
+    </div>
+  </div>`;
+}
+
+// ── RENDER ────────────────────────────────────────────────────
+function renderMarkers() {
+  clusterGroup.clearLayers();
+  map.eachLayer(l => { if (l instanceof L.Polyline && !(l instanceof L.Polygon)) map.removeLayer(l); });
+  jobMarkers = {};
+  const filtered = getFiltered();
+
+  filtered.forEach(job => {
+    const colour = clientColourMap[job.client] || CLIENT_COLOURS[0];
+    const gps = job.startGps || job.endGps;
+    if (!gps) return;
+    const marker = L.marker([gps.lat, gps.lon], { icon: makeIcon(colour, !job.startGps&&!!job.endGps) });
+    marker.bindPopup(buildPopup(job), { maxWidth: 280 });
+    marker.on('click', () => setActiveJob(job.id));
+    jobMarkers[job.id] = marker;
+    clusterGroup.addLayer(marker);
+
+    if (job.startGps && job.endGps) {
+      const endM = L.marker([job.endGps.lat, job.endGps.lon], { icon: makeIcon(colour, true) });
+      endM.bindPopup(buildPopup(job), { maxWidth: 280 });
+      endM.on('click', () => setActiveJob(job.id));
+      clusterGroup.addLayer(endM);
+      L.polyline([[job.startGps.lat,job.startGps.lon],[job.endGps.lat,job.endGps.lon]], { color: colour, weight: 2, opacity: 0.5, dashArray: '5,5' }).addTo(map);
+    }
+  });
+
+  renderJobList(filtered);
+  updateStats(filtered);
+}
+
+function renderJobList(jobs) {
+  const sorted = [...jobs].reverse();
+  const count = `${jobs.length} job${jobs.length!==1?'s':''}`;
+  document.getElementById('sidebar-count').textContent = count;
+  document.getElementById('sheet-count').textContent = count;
+
+  const html = sorted.length === 0
+    ? '<div class="no-jobs">No jobs match the current filter.</div>'
+    : sorted.map(job => {
+        const colour = clientColourMap[job.client] || CLIENT_COLOURS[0];
+        return `<div class="job-item" id="list-${job.id}" onclick="focusJob('${job.id}')" style="border-left-color:${colour}">
+          <div class="job-item-top">
+            <div class="job-item-client">${job.client}</div>
+            <div class="job-item-dur">${fmtHours(job.durationHrs)}</div>
+          </div>
+          <div class="job-item-date">📅 ${job.date} · ${job.startTime}${job.endTime?' – '+job.endTime:''}</div>
+          ${job.notes?`<div class="job-item-notes">📝 ${job.notes}</div>`:''}
+          <div class="job-item-badges">
+            ${(job.startPhoto||job.endPhoto)?'<span class="badge badge-photo">📸 Photos</span>':''}
+            ${job.manual?'<span class="badge badge-manual">Manual</span>':''}
+            ${(!job.startGps&&!job.endGps)?'<span class="badge badge-nogps">No GPS</span>':''}
+          </div>
+        </div>`;
+      }).join('');
+
+  document.getElementById('jobListDesktop').innerHTML = html;
+  document.getElementById('jobListMobile').innerHTML = html;
+}
+
+function focusJob(id) {
+  setActiveJob(id);
+  closeAllSheets();
+  const marker = jobMarkers[id];
+  if (!marker) return;
+  clusterGroup.zoomToShowLayer(marker, () => marker.openPopup());
+}
+
+function setActiveJob(id) {
+  activeJobId = id;
+  document.querySelectorAll('.job-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll(`#list-${id}`).forEach(el => {
+    el.classList.add('active');
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+// ── FILTERS ───────────────────────────────────────────────────
+function getFiltered() {
+  const from = document.getElementById('dateFrom').value;
+  const to = document.getElementById('dateTo').value;
+  return allJobs.filter(job => {
+    if (activeClient !== 'all' && job.client !== activeClient) return false;
+    if (from && job.rawDate && job.rawDate < new Date(from)) return false;
+    if (to && job.rawDate && job.rawDate > new Date(to+'T23:59:59')) return false;
+    return true;
+  });
+}
+
+function filterClient(client) {
+  activeClient = client;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  const chip = client==='all' ? document.querySelector('.chip-all') : document.querySelector(`[data-client="${client}"]`);
+  if (chip) chip.classList.add('active');
+  renderMarkers();
+}
+
+function applyFilters() { renderMarkers(); }
+function clearDates() {
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
+  renderMarkers();
+}
+
+function buildClientChips() {
+  const clients = [...new Set(allJobs.map(j => j.client))].sort();
+  const container = document.getElementById('clientChips');
+  container.innerHTML = `<div class="chip chip-all active" onclick="filterClient('all')">All</div>`;
+  clients.forEach(client => {
+    const chip = document.createElement('div');
+    chip.className = 'chip'; chip.dataset.client = client;
+    chip.style.color = clientColourMap[client];
+    chip.textContent = client;
+    chip.onclick = () => filterClient(client);
+    container.appendChild(chip);
+  });
+}
+
+function updateStats(jobs) {
+  const totalHrs = jobs.reduce((a,j) => a+j.durationHrs, 0);
+  document.getElementById('stat-jobs').textContent = jobs.length;
+  document.getElementById('stat-hours').textContent = fmtHours(totalHrs);
+  document.getElementById('stat-clients').textContent = new Set(jobs.map(j=>j.client)).size;
+}
+
+function fitMapToBounds() {
+  const points = allJobs.flatMap(j => [j.startGps?[j.startGps.lat,j.startGps.lon]:null, j.endGps?[j.endGps.lat,j.endGps.lon]:null].filter(Boolean));
+  if (points.length===0) return;
+  if (points.length===1) map.setView(points[0], 14);
+  else map.fitBounds(points, { padding: isMobile() ? [20,20] : [40,40] });
+}
+
+// ── LOAD DATA ─────────────────────────────────────────────────
+async function loadData() {
+  try {
+    const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Jobs!A:O?key=${SHEETS_KEY}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message);
+    if (!data.values || data.values.length < 2) {
+      document.getElementById('loading').innerHTML = '<div style="color:var(--fog);text-align:center;padding:20px"><div style="font-size:40px;margin-bottom:12px">📍</div><p>No jobs found yet.</p></div>';
+      return;
+    }
+    allJobs = data.values.slice(1).map(row => {
+      const hasEmail = row[4] && !row[4].match(/^\d{1,2}:\d{2}/);
+      const o = hasEmail ? 1 : 0;
+      return {
+        id: row[0]||String(Math.random()), date: row[1]||'', client: row[2]||'', business: row[3]||'',
+        startTime: row[4+o]||'', endTime: row[5+o]||'', durationHrs: parseFloat(row[6+o])||0,
+        notes: row[7+o]||'', startGps: parseGps(row[8+o]), endGps: parseGps(row[9+o]),
+        mapLink: row[10+o]||'', startPhoto: row[11+o]||'', endPhoto: row[12+o]||'',
+        manual: row[13+o]==='Yes', rawDate: parseAusDate(row[1]),
+      };
+    });
+    buildClientColours();
+    buildClientChips();
+    renderMarkers();
+    fitMapToBounds();
+    document.getElementById('loading').style.display = 'none';
+  } catch(e) {
+    console.error(e);
+    document.getElementById('loading').innerHTML = `<div style="color:var(--clay-light);text-align:center;padding:20px"><div style="font-size:40px;margin-bottom:12px">⚠️</div><p>${e.message}</p><p style="font-size:12px;margin-top:8px;color:var(--fog)">Make sure your Sheet is publicly readable.</p></div>`;
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>
